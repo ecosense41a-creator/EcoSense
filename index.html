@@ -1097,7 +1097,7 @@ var APK_SAME = !/^https?:\/\//i.test(APK_URL) || APK_URL.indexOf(location.origin
   selectNode(1);
 
   /* ---------- Download landing view ---------- */
-  var mainEl = $('main'), dlEl = $('dl-view'), wasDl = false, pendingGo = false, dlTimer = null;
+  var mainEl = $('main'), dlEl = $('dl-view'), dlTimer = null;
   function setDl(state) {
     clearTimeout(dlTimer);
     var st = $('dl-status');
@@ -1128,25 +1128,41 @@ var APK_SAME = !/^https?:\/\//i.test(APK_URL) || APK_URL.indexOf(location.origin
       $('dl-btn-t').textContent = 'Download APK';
     }
   }
-  function route() {
-    var h = location.hash, isDl = (h === '#install');
-    mainEl.hidden = isDl;
-    dlEl.hidden = !isDl;
-    if (isDl) {
+  var savedY = 0, histOK = true, afterLeave = null;
+  try { history.scrollRestoration = 'manual'; } catch (e) {}
+  function showDl(on, go) {
+    if (on === !dlEl.hidden) return;
+    if (on) {
+      savedY = window.scrollY;
+      mainEl.hidden = true; dlEl.hidden = false;
       window.scrollTo(0, 0);
-      var go = pendingGo; pendingGo = false;
       setDl(go ? 'going' : 'idle');
       $('dl-warn').hidden = true;
+    } else {
+      clearTimeout(dlTimer);
+      dlEl.hidden = true; mainEl.hidden = false;
+      var f = afterLeave; afterLeave = null;
+      window.scrollTo(0, savedY);
+      if (f) f();
     }
-    else if (h.length > 1) {
-      var el = document.getElementById(h.slice(1));
-      if (el && (wasDl || !el.getBoundingClientRect().height)) el.scrollIntoView();
-    } else if (wasDl) { window.scrollTo(0, 0); }
-    wasDl = isDl;
     onScroll();
   }
-  window.addEventListener('hashchange', route);
-  route();
+  function openDl() {
+    try { history.pushState({ view: 'dl' }, ''); } catch (e) { histOK = false; }
+    showDl(true, true);
+  }
+  function closeDl() {
+    if (histOK && history.state && history.state.view === 'dl') { history.back(); }
+    else { showDl(false); }
+  }
+  window.addEventListener('popstate', function () {
+    showDl(!!(history.state && history.state.view === 'dl'), false);
+  });
+  /* Old links that still carry #install open the landing view and the address is cleaned up */
+  if (location.hash === '#install') {
+    try { history.replaceState({ view: 'dl' }, '', location.pathname + location.search); } catch (e) {}
+    showDl(true, false);
+  }
 
   var chkBtns = qa('#chk button');
   function chkUpdate() {
@@ -1179,12 +1195,19 @@ var APK_SAME = !/^https?:\/\//i.test(APK_URL) || APK_URL.indexOf(location.origin
     dlBtn.addEventListener('click', function (e) { e.preventDefault(); $('dl-warn').hidden = false; });
   }
 
-  /* Logo, footer logo and Back link always return to the very top */
-  qa('a[href="#top"]').forEach(function (a) {
+  /* Menu, logo and footer links scroll without putting # in the address bar */
+  qa('a[href^="#"]').forEach(function (a) {
+    var h = a.getAttribute('href');
+    if (h === '#install' || h.length < 2) return;
     a.addEventListener('click', function (e) {
       e.preventDefault();
-      if (location.hash === '#install') { location.hash = ''; }
-      else { window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' }); }
+      var el = h === '#top' ? null : document.getElementById(h.slice(1));
+      var go = function () {
+        if (h === '#top') window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+        else if (el) el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+      };
+      if (!dlEl.hidden) { afterLeave = function () { if (h === '#top') window.scrollTo(0, 0); else go(); }; closeDl(); }
+      else { go(); }
     });
   });
 
@@ -1196,9 +1219,9 @@ var APK_SAME = !/^https?:\/\//i.test(APK_URL) || APK_URL.indexOf(location.origin
       if (APK_SAME) { a.setAttribute('download', 'EcoSense.apk'); }
       else { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); }
     }
-    a.addEventListener('click', function () {
-      pendingGo = true;
-      if (location.hash === '#install') route(); else location.hash = '#install';
+    a.addEventListener('click', function (e) {
+      if (!APK_URL) e.preventDefault();
+      openDl();
     });
   });
 
